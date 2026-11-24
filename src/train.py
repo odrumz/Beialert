@@ -56,8 +56,9 @@ def seasonal_naive(monthly: pd.Series, test: pd.DataFrame) -> tuple[np.ndarray, 
     return filled.to_numpy(), int(missing.sum())
 
 
-def pick_alpha(train: pd.DataFrame) -> float:
+def pick_alpha(train: pd.DataFrame, feature_cols: list[str] | None = None) -> float:
     """Chronological inner CV over alpha. Falls back if the series is short."""
+    feature_cols = feature_cols or config.FEATURES
     if len(train) < 40:
         return 1.0
 
@@ -71,8 +72,8 @@ def pick_alpha(train: pd.DataFrame) -> float:
             model = Pipeline(
                 [("scale", StandardScaler()), ("model", Ridge(alpha=alpha))]
             )
-            model.fit(fold_tr[config.FEATURES], fold_tr[config.TARGET])
-            pred = model.predict(fold_val[config.FEATURES])
+            model.fit(fold_tr[feature_cols], fold_tr[config.TARGET])
+            pred = model.predict(fold_val[feature_cols])
             errors.append(
                 np.sqrt(mean_squared_error(fold_val[config.TARGET], pred))
             )
@@ -81,22 +82,25 @@ def pick_alpha(train: pd.DataFrame) -> float:
     return min(scores, key=scores.get)
 
 
-def train_one(key: str, monthly: pd.Series) -> dict | None:
-    frame = features.model_frame(monthly)
-    if len(frame) < config.MIN_OBSERVATIONS:
-        return None
+def evaluate(
+    key: str, frame: pd.DataFrame, monthly: pd.Series, feature_cols: list[str]
+) -> dict:
+    """Chronological split, fit ridge + forest, score, pick the winner.
 
+    Shared by train_one and src.compare_fx so both use identical selection.
+    `frame` must already be the final row set; nothing is dropped here.
+    """
     cut = int(len(frame) * config.TRAIN_FRACTION)
     train, test = frame.iloc[:cut], frame.iloc[cut:]
     assert train.index.max() < test.index.min(), f"{key}: split leaks time"
 
-    X_train, y_train = train[config.FEATURES], train[config.TARGET]
-    X_test, y_test = test[config.FEATURES], test[config.TARGET]
+    X_train, y_train = train[feature_cols], train[config.TARGET]
+    X_test, y_test = test[feature_cols], test[config.TARGET]
 
     naive = X_test["lag_1"].to_numpy()  # last month's price
     seasonal, seasonal_fallbacks = seasonal_naive(monthly, test)
 
-    alpha = pick_alpha(train)
+    alpha = pick_alpha(train, feature_cols)
     ridge = Pipeline([("scale", StandardScaler()), ("model", Ridge(alpha=alpha))])
     ridge.fit(X_train, y_train)
     ridge_pred = ridge.predict(X_test)
@@ -124,6 +128,39 @@ def train_one(key: str, monthly: pd.Series) -> dict | None:
         for k in ("mase", "mase_seasonal")
     )
 
+    return {
+        "test": test,
+        "scores": scores,
+        "best": best,
+        "chosen": chosen,
+        "predictions": predictions,
+        "alpha": alpha,
+        "shippable": shippable,
+        "seasonal_fallbacks": seasonal_fallbacks,
+    }
+
+
+def active_series(
+    monthly: dict[str, pd.Series],
+) -> tuple[dict[str, pd.Series], pd.Timestamp, pd.Timestamp]:
+    """Series still being monitored, relative to the newest date in the file."""
+    dated = {k: s for k, s in monthly.items() if s.last_valid_index() is not None}
+    newest = max(s.last_valid_index() for s in dated.values())
+    cutoff = newest - pd.DateOffset(months=config.MAX_STALENESS_MONTHS)
+    fresh = {k: s for k, s in dated.items() if s.last_valid_index() >= cutoff}
+    return fresh, newest, cutoff
+
+
+def train_one(key: str, monthly: pd.Series) -> dict | None:
+    frame = features.model_frame(monthly)
+    if len(frame) < config.MIN_OBSERVATIONS:
+        return None
+
+    ev = evaluate(key, frame, monthly, config.FEATURES)
+    test, scores, best = ev["test"], ev["scores"], ev["best"]
+    chosen, predictions, alpha = ev["chosen"], ev["predictions"], ev["alpha"]
+    y_test = test[config.TARGET]
+
     # Refit on everything so the live forecast uses all known history.
     chosen.fit(frame[config.FEATURES], frame[config.TARGET])
 
@@ -143,9 +180,9 @@ def train_one(key: str, monthly: pd.Series) -> dict | None:
         "last_observed_price": float(monthly.dropna().iloc[-1]),
         "n_observations": int(len(frame)),
         "scores": scores,
-        "seasonal_fallbacks": seasonal_fallbacks,
+        "seasonal_fallbacks": ev["seasonal_fallbacks"],
         "n_test": int(len(test)),
-        "shippable": shippable,
+        "shippable": ev["shippable"],
     }
 
 
@@ -156,10 +193,7 @@ def main() -> None:
 
     # Drop series that stopped being monitored, relative to the newest date
     # in the file. Forecasting a market last seen in 2019 is not useful.
-    dated = {k: s for k, s in monthly.items() if s.last_valid_index() is not None}
-    newest = max(s.last_valid_index() for s in dated.values())
-    cutoff = newest - pd.DateOffset(months=config.MAX_STALENESS_MONTHS)
-    fresh = {k: s for k, s in dated.items() if s.last_valid_index() >= cutoff}
+    fresh, newest, cutoff = active_series(monthly)
     print(
         f"newest data: {newest:%Y-%m} | active since {cutoff:%Y-%m}: "
         f"{len(fresh)} series, {len(monthly) - len(fresh)} stale and dropped"

@@ -13,6 +13,30 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from . import config
+
+
+def _where(market: str) -> str:
+    """'nationally' for the national median series, else 'in <market>'."""
+    return "nationally" if market.strip().upper() == "NATIONAL" else f"in {market}"
+
+
+def _inputs_sentence() -> str:
+    """What the model can and cannot see, read from config.FEATURES.
+
+    Kept in step with the live feature set so it stays true if the FX
+    features (config.FX_FEATURES) are ever added back.
+    """
+    if any(f in config.FEATURES for f in config.FX_FEATURES):
+        return (
+            "The model sees price history and the USD/KES exchange rate only, "
+            "so it cannot attribute this to fuel costs or rainfall."
+        )
+    return (
+        "The model sees price history only, so it cannot attribute this to "
+        "the exchange rate, fuel costs or rainfall."
+    )
+
 
 def _month_name(stamp: str) -> str:
     return pd.Timestamp(stamp + "-01").strftime("%B %Y")
@@ -56,7 +80,7 @@ def _not_shippable(result: dict, history: pd.Series) -> dict:
     currency = result["currency"]
     last_price = result["last_observed_price"]
     headline = (
-        f"For {result['commodity']} in {result['market']}, the best available "
+        f"For {result['commodity']} {_where(result['market'])}, the best available "
         f"estimate is that the price stays near its last observed value of "
         f"{currency} {last_price:,.0f} per {result['unit']} "
         f"({_month_name(result['last_observed_month'])})."
@@ -130,7 +154,7 @@ def build(result: dict, history: pd.Series) -> dict:
 
     # 1. What the model expects.
     headline = (
-        f"{result['commodity']} in {result['market']} is forecast {verb}"
+        f"{result['commodity']} {_where(result['market'])} is forecast {verb}"
         f"{'' if change == 0 else f' {abs(change):.1f}%'} to about "
         f"{currency} {predicted:,.0f} per {result['unit']} "
         f"by {_month_name(first['month'])}."
@@ -168,9 +192,7 @@ def build(result: dict, history: pd.Series) -> dict:
         top = contributions[0]
         sentences.append(
             f"The forecast leans mainly on {top['label'].lower()} "
-            f"({top['share_pct']}% of the movement). The model sees price "
-            f"history only, so it cannot attribute this to fuel costs, the "
-            f"shilling or rainfall."
+            f"({top['share_pct']}% of the movement). {_inputs_sentence()}"
         )
 
     # 5. Honest limits.
@@ -200,6 +222,13 @@ def build(result: dict, history: pd.Series) -> dict:
             f"own error: by {_month_name(last['month'])} the range widens to "
             f"{currency} {last['lower_80']:,.0f}–{last['upper_80']:,.0f}."
         )
+        if result.get("fx_assumption"):
+            held_from = result["fx_assumption"].rsplit(" ", 1)[-1]
+            sentences.append(
+                f"The exchange rate was assumed to hold at its last known "
+                f"level ({_month_name(held_from)}), since USD/KES for future "
+                f"months is not yet observable."
+            )
 
     return {
         "headline": headline,

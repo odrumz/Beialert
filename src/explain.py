@@ -32,6 +32,8 @@ LABELS = {
     "roll_std_6": "Recent volatility (6mo)",
     "mom_change": "Month-on-month momentum",
     "season": "Time of year",
+    "fx_lag1": "Exchange rate (USD/KES)",
+    "fx_change_3m": "Exchange rate trend, 3mo",
 }
 
 # month_sin and month_cos are one idea split across two columns; they are

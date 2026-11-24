@@ -84,12 +84,27 @@ def forecast(series_key: str, horizon: int = 1) -> dict:
     sigma = entry["residual_std"]
     last_price = float(history.iloc[-1])
 
+    # FX handling only when the model actually uses FX features; otherwise
+    # no rate is loaded and no assumption is reported.
+    use_fx = features.uses_fx()
+    fx = features._fx().copy() if use_fx else None
+    fx_last_known = fx.index.max() if use_fx else None
+    fx_assumption = None
+
     points = []
     first_row = None
     blocked_reason = None
     for step in range(1, horizon + 1):
         target_month = history.index.max() + pd.DateOffset(months=1)
-        row = features.row_from_history(history, target_month)
+        needed = target_month - pd.DateOffset(months=1)  # features use FX at T-1
+        if use_fx and needed > fx.index.max():
+            # FX for these months is not observed yet: hold the last known
+            # rate for every month up to T-1, so fx_change_3m's T-4 lookup
+            # never lands in a gap.
+            gap = pd.date_range(fx.index.max(), needed, freq="MS")[1:]
+            fx = pd.concat([fx, pd.Series(fx.loc[fx_last_known], index=gap)])
+        fx_held = use_fx and needed > fx_last_known
+        row = features.row_from_history(history, target_month, fx)
 
         if row.isna().any(axis=None):
             # Not enough history to build a complete feature row.
@@ -114,6 +129,9 @@ def forecast(series_key: str, horizon: int = 1) -> dict:
                 "change_pct": round((predicted / last_price - 1) * 100, 2),
             }
         )
+        if fx_held:
+            # Only recorded once a forecast point actually used the held rate.
+            fx_assumption = f"held flat from {fx_last_known:%Y-%m}"
         history.loc[target_month] = predicted
 
     scores = entry["scores"][entry["model_name"]]
@@ -147,6 +165,8 @@ def forecast(series_key: str, horizon: int = 1) -> dict:
             "not guarantees. Accuracy falls as the horizon increases."
         ),
     }
+    if fx_assumption is not None:
+        result["fx_assumption"] = fx_assumption
     if blocked_reason is not None:
         result["blocked_reason"] = blocked_reason
     result["summary"] = narrative.build(result, entry["history"])

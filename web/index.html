@@ -255,7 +255,8 @@ async function run(){
     const first = f.forecast[0];
     const rejected = f.shippable === false;
 
-    $('label').textContent = `${f.commodity} · ${f.market} · per ${f.unit}`;
+    const where = String(f.market).toUpperCase() === 'NATIONAL' ? 'national average' : f.market;
+    $('label').textContent = `${f.commodity} · ${where} · per ${f.unit}`;
     $('result').querySelector('.headline').classList.toggle('rejected', rejected);
     $('rejectedNote').style.display = rejected ? 'block' : 'none';
     if(rejected){
