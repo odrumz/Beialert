@@ -10,7 +10,6 @@ not a trade worth making for an app about prices.
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 from . import config

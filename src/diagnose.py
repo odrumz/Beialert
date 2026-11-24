@@ -10,10 +10,9 @@ you would gain by shortening the lags.
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
-from . import config, data, features
+from . import config, data
 
 
 def usable_rows(series: pd.Series, lags, windows) -> int:

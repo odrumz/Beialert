@@ -107,21 +107,31 @@ Python.
 ## Layout
 
 ```
-src/config.py     settings: filters, features, horizons
-src/data.py       load, clean, collapse to monthly series
-src/features.py   lags, rolling stats, cyclical month
-src/train.py      chronological split, Ridge vs Random Forest vs naive
+src/config.py        settings: filters, features, horizons
+src/data.py          load, clean, collapse to monthly series
+src/features.py      lags, rolling stats, cyclical month (+ optional FX columns)
+src/drivers.py       USD/KES loader: CBK export or rate implied by the WFP file
+src/train.py         chronological split, Ridge vs Random Forest vs naive
+src/compare_fx.py    controlled A/B: same rows and split, with vs without FX
+src/diagnose.py      why series are dropped: rows surviving feature building per lag set
+src/pooled.py        stacked log-return table across series, for the pooled model
 src/train_pooled.py  offline pooled-model experiment (not used in production)
-src/predict.py    recursive multi-month forecasting
-src/api.py        FastAPI endpoints
-web/index.html    test console
+src/predict.py       recursive multi-month forecasting
+src/explain.py       per-forecast feature contributions and labels
+src/narrative.py     plain-English forecast summary, template-based
+src/api.py           FastAPI endpoints
+web/index.html       test console
 ```
 
 ## Known limits
 
 - Forecasts are recursive: month 2 is built on month 1's prediction, so error
   compounds. Treat anything past three months as indicative.
-- Missing months are left as gaps rather than interpolated.
-- Features are price history only. Fuel, exchange rate and rainfall drivers
-  are not in the model yet, so a driver-attribution screen cannot be built
-  from it as it stands.
+- Price gaps of one or two months are linearly interpolated; longer gaps are
+  left as gaps.
+- Features are price history only. USD/KES was tested in `src/compare_fx.py`
+  under a controlled A/B that held rows and test months fixed, found no
+  improvement (median MASE change −0.004), and was therefore left out; the
+  code is retained for reproducibility. Fuel and rainfall drivers are not in
+  the model, so a driver-attribution screen cannot be built from it as it
+  stands.

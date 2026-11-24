@@ -13,7 +13,6 @@ here automatically. Nothing in this file needs to change.
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 from . import config
