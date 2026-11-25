@@ -8,4 +8,3 @@ venv/
 models/*.joblib
 *:Zone.Identifier
 data/*(1)*
-*.ipynb
