@@ -37,6 +37,13 @@
   .big{font-family:'Fraunces',Georgia,serif;font-size:32px;font-weight:700}
   .delta{font-size:17px;font-weight:600;color:var(--accent)}
   /* Non-shippable series: neutral grey, so a rejected model doesn't read as an alert. */
+  .horizon{display:none;flex-wrap:wrap;gap:8px 18px;align-items:baseline;margin-top:12px;
+           padding:12px 16px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+  #stalePrompt{color:var(--accent);font-size:14px;font-weight:600;align-self:center}
+  .horizon strong{font-size:16px}
+  .horizon .val{font-size:18px;font-weight:700}
+  .horizon .rng{color:var(--muted);font-size:15px}
+  .horizon .note{color:var(--muted);font-size:13px;flex-basis:100%;margin-top:2px}
   .headline.rejected{background:#F5F5F4;border-color:#D6D3D1}
   .headline.rejected .delta{color:var(--muted)}
   .rejected-note{margin:0 0 10px;font-size:13px;color:var(--muted)}
@@ -103,6 +110,7 @@
       </select>
     </div>
     <button id="go" disabled>Forecast</button>
+    <span id="stalePrompt" style="display:none">press Forecast to update</span>
   </div>
 
   <div id="error" class="err" style="display:none"></div>
@@ -117,6 +125,8 @@
       <div><div class="delta" id="delta"></div><div class="meta" id="month"></div></div>
       <div style="margin-left:auto"><span class="badge" id="quality"></span><span class="badge muted" id="notShippable" style="display:none">not shippable</span></div>
     </div>
+
+    <div class="horizon" id="horizonStrip" style="display:none"></div>
 
     <div class="panel">
       <h2>History and forecast</h2>
@@ -240,6 +250,7 @@ function drawChart(hist, points, rejected){
 async function run(){
   $('error').style.display='none';
   $('go').disabled = true; $('go').textContent = 'Loading…';
+  $('stalePrompt').style.display = 'none';
   const key = $('series').value, h = $('horizon').value;
   try{
     const [f, hist] = await Promise.all([
@@ -253,6 +264,7 @@ async function run(){
       return;
     }
     const first = f.forecast[0];
+    const shown = f.forecast[f.forecast.length - 1];
     const rejected = f.shippable === false;
 
     const where = String(f.market).toUpperCase() === 'NATIONAL' ? 'national average' : f.market;
@@ -264,9 +276,14 @@ async function run(){
       $('delta').textContent = 'no reliable forecast';
       $('month').textContent = `last observed, ${f.last_observed_month}`;
     } else {
-      $('price').textContent = `${f.currency} ${first.predicted_price.toLocaleString()}`;
-      $('delta').textContent = `${first.change_pct > 0 ? '+' : ''}${first.change_pct}%`;
-      $('month').textContent = `by ${first.month} · last seen ${f.currency} ${f.last_observed_price.toLocaleString()} in ${f.last_observed_month}`;
+      // The headline follows the selected horizon, so the card visibly
+      // answers the question the dropdown asked.
+      $('price').textContent = `${f.currency} ${shown.predicted_price.toLocaleString()}`;
+      $('delta').textContent = `${shown.change_pct > 0 ? '+' : ''}${shown.change_pct}%`;
+      $('month').textContent = (f.forecast.length > 1
+        ? `by ${shown.month} · month ${shown.horizon} of ${f.forecast.length}`
+        : `by ${shown.month}`)
+        + ` · last seen ${f.currency} ${f.last_observed_price.toLocaleString()} in ${f.last_observed_month}`;
     }
 
     const q = f.model_quality;
@@ -311,6 +328,22 @@ async function run(){
         </div>`).join('');
     }
 
+    // The headline shows the far end of the horizon; this strip keeps next
+    // month visible, because the summary and drivers below describe that month.
+    if(!rejected && f.forecast.length > 1){
+      $('horizonStrip').innerHTML =
+        `<strong>Next month · ${first.month}</strong>`
+      + `<span class="val">${f.currency} ${first.predicted_price.toLocaleString()}</span>`
+      + `<span class="rng">80% range ${first.lower_80.toLocaleString()} – ${first.upper_80.toLocaleString()}</span>`
+      + `<span class="rng">${first.change_pct > 0 ? '+' : ''}${first.change_pct}% vs last observed</span>`
+      + `<span class="note">The summary and drivers below describe this month. `
+      + `The headline above shows month ${shown.horizon}, where the band is wider `
+      + `because each step forecasts off the previous one.</span>`;
+      $('horizonStrip').style.display = 'flex';
+    } else {
+      $('horizonStrip').style.display = 'none';
+    }
+
     drawChart(hist, f.forecast, rejected);
     $('raw').textContent = JSON.stringify(f, null, 2);
     $('result').style.display = 'block';
@@ -319,6 +352,9 @@ async function run(){
 }
 
 $('go').addEventListener('click', run);
+['series','horizon'].forEach(id => $(id).addEventListener('change', () => {
+  if($('result').style.display === 'block') $('stalePrompt').style.display = 'inline';
+}));
 boot();
 </script>
 </body>

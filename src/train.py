@@ -130,6 +130,8 @@ def evaluate(
 
     return {
         "test": test,
+        "naive": naive,
+        "seasonal": seasonal,
         "scores": scores,
         "best": best,
         "chosen": chosen,
@@ -161,6 +163,16 @@ def train_one(key: str, monthly: pd.Series) -> dict | None:
     chosen, predictions, alpha = ev["chosen"], ev["predictions"], ev["alpha"]
     y_test = test[config.TARGET]
 
+    # Held-out results, captured before the refit below replaces the model
+    # that produced them. src.evaluate draws its figures from these.
+    test_results = {
+        "test_index": [m.date().isoformat() for m in test.index],
+        "test_actual": [float(v) for v in y_test],
+        "test_predicted": [float(v) for v in predictions],
+        "test_naive": [float(v) for v in ev["naive"]],
+        "test_seasonal": [float(v) for v in ev["seasonal"]],
+    }
+
     # Refit on everything so the live forecast uses all known history.
     chosen.fit(frame[config.FEATURES], frame[config.TARGET])
 
@@ -183,6 +195,7 @@ def train_one(key: str, monthly: pd.Series) -> dict | None:
         "seasonal_fallbacks": ev["seasonal_fallbacks"],
         "n_test": int(len(test)),
         "shippable": ev["shippable"],
+        **test_results,
     }
 
 
